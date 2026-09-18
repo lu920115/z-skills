@@ -5,7 +5,7 @@ description: 当用户给出视频链接、链接清单或 z-web-pack 的 04-med
 
 # 视频下载器
 
-把用户给的视频链接下载成本地视频文件。网页素材采集只记录视频链接，真正下载统一交给本 skill。直链视频支持 `.part` 文件和 HTTP Range 续传，平台视频和 m3u8 使用 `yt-dlp` 的续传、分片并发与重试能力；遇到平台风控时优先使用导出的 `cookies.txt` 文件重试。微信视频号（`weixin.qq.com/sph/` 分享链接）通过在线解析服务直接获取视频地址下载，无需本地安装额外工具。
+把用户给的视频链接下载成本地视频文件。网页素材采集只记录视频链接，真正下载统一交给本 skill。直链视频支持 `.part` 文件和 HTTP Range 续传，平台视频和 m3u8 使用 `yt-dlp` 的续传、分片并发与重试能力；遇到平台风控时优先使用导出的 `cookies.txt` 文件重试。微信视频号（`weixin.qq.com/sph/` 分享链接）通过在线解析服务获取视频地址下载，无需本地安装额外工具。默认可用公开演示服务；生产使用应自部署解析 Worker 并在 `~/.config/z-video-downloader/config.json` 配置 `api_url` + `token`（脚本自动带 Bearer 认证和 4 次重试）。自部署 Worker 需要元宝 web 端 Cookie（约 1 个月有效，到期换 Cookie 后更新 Worker 环境变量即可）。
 
 ## 依赖
 
@@ -77,7 +77,7 @@ Video/Downloads/YYYY-MM-DD-主题/
   "https://weixin.qq.com/sph/Axv548mzBF"
 ```
 
-视频号链接会自动识别并通过在线解析服务下载，默认保存 H.264 和 H.265 两个版本。
+视频号链接会自动识别并通过解析服务下载，默认保存 H.264 和 H.265 两个版本。已配置 `~/.config/z-video-downloader/config.json` 时走自部署 Worker（Bearer 认证），否则使用公开演示服务。
 
 命令行临时调试仍支持 `--browser-cookies chrome`，但网页服务应使用 `--cookies-file`，避免服务进程反复唤起 Chrome/Safari。
 
@@ -142,7 +142,7 @@ YouTube 无 cookie 时若 `yt-dlp` 被登录校验拦截，脚本默认会再尝
 
 - mp4/webm/mov/m4v/mkv/flv/ogv 直链：脚本直接流式下载，保留 Referer 和 User-Agent。
 - m3u8、YouTube、Bilibili、Vimeo、X/Twitter、TikTok、抖音等：交给 `yt-dlp`。
-- **微信视频号**（`https://weixin.qq.com/sph/xxx`）：通过 `sph.litao.workers.dev` 在线解析服务获取 H.264/H.265 视频直链后下载，默认同时保存两个编码版本。无需微信登录态、无需安装证书。感谢 [ltaoo/wx_channels_download](https://github.com/ltaoo/wx_channels_download) 提供解析服务。
+- **微信视频号**（`https://weixin.qq.com/sph/xxx`）：通过解析服务获取 H.264/H.265 视频直链后下载，默认同时保存两个编码版本。优先使用自部署 Worker（`~/.config/z-video-downloader/config.json` 配置 `api_url`/`token`）；公开演示服务 `sph.litao.workers.dev` 可能因 Cookie 失效返回 401，仅作兜底。worker 部署参考 https://github.com/ltaoo/wx_channels_download 的 `deploy sph`（需要元宝 web 端 Cookie，约 1 个月更换一次）。感谢 [ltaoo/wx_channels_download](https://github.com/ltaoo/wx_channels_download) 提供解析服务。
 - YouTube 直连被登录校验拦截时：尝试 Invidious `local=true` 代理端点，使用 Range 小块续传保存 360p MP4。
 - 默认 `--no-playlist`，避免一个链接意外下载整套列表。
 - 默认 `--max-video-mb 2000`，超出时失败并记录到报告。

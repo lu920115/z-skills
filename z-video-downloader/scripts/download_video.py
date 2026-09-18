@@ -78,7 +78,22 @@ PLATFORM_HOST_HINTS = {
 
 # WeChat Channels (视频号) online parsing service
 # Credits: https://github.com/ltaoo/wx_channels_download
+# Default is the public demo; override via ~/.config/z-video-downloader/config.json:
+#   {"api_url": "https://<your-worker>.<subdomain>.workers.dev/api/fetch_video_profile",
+#    "token": "<access credential>"}
 WX_CHANNELS_PARSE_API = "https://sph.litao.workers.dev/api/fetch_video_profile"
+
+
+def wx_channels_config() -> dict:
+    """Read self-hosted 视频号 parse service config (api_url + bearer token)."""
+    raw = os.environ.get("WX_CHANNELS_CONFIG", "~/.config/z-video-downloader/config.json")
+    try:
+        data = json.loads(Path(raw).expanduser().read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("api_url"):
+            return {"api_url": str(data["api_url"]).rstrip("/"), "token": str(data.get("token") or "")}
+    except Exception:
+        pass
+    return {"api_url": WX_CHANNELS_PARSE_API, "token": ""}
 
 INVIDIOUS_INSTANCES = (
     "https://inv.thepixora.com",
@@ -214,13 +229,30 @@ def download_wx_channels_video(
     record = base_record(url, "wx-channels")
     record["platform"] = "WeixinChannels"
     try:
-        # Step 1: Parse the share link via online service
-        parse_resp = session.post(
-            WX_CHANNELS_PARSE_API,
-            json={"url": url},
-            headers={"Content-Type": "application/json", "User-Agent": DEFAULT_USER_AGENT},
-            timeout=min(timeout, 30),
-        )
+        # Step 1: Parse the share link via parsing service (with retries —
+        # workers.dev endpoints can be flaky from some networks).
+        cfg = wx_channels_config()
+        parse_headers = {"Content-Type": "application/json", "User-Agent": DEFAULT_USER_AGENT}
+        if cfg["token"]:
+            parse_headers["Authorization"] = f"Bearer {cfg['token']}"
+        parse_resp = None
+        last_parse_err = ""
+        for attempt in range(4):
+            try:
+                parse_resp = session.post(
+                    cfg["api_url"],
+                    json={"url": url},
+                    headers=parse_headers,
+                    timeout=min(timeout, 30),
+                )
+                break
+            except requests.RequestException as exc:
+                last_parse_err = str(exc)[:200]
+                if attempt < 3:
+                    time.sleep(1.5 * (attempt + 1))
+        if parse_resp is None:
+            record["note"] = f"wx-channels-parse-retry-exhausted: {last_parse_err}"
+            return record
         if parse_resp.status_code != 200:
             record["note"] = f"wx-channels-parse-http-{parse_resp.status_code}: {parse_resp.text[:200]}"
             return record
@@ -326,7 +358,7 @@ def download_wx_channels_video(
             record["files"] = downloaded_files
             record["bytes"] = total_bytes
             versions = ", ".join(label for _, label in video_urls[:len(downloaded_files)])
-            record["note"] = f"via sph.litao.workers.dev ({versions})"
+            record["note"] = f"via {urlparse(cfg['api_url']).hostname} ({versions})"
         else:
             if not record["note"]:
                 record["note"] = "wx-channels-all-versions-failed"
